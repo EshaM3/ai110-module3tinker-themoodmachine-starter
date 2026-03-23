@@ -13,6 +13,9 @@ from typing import List, Dict, Tuple, Optional
 
 from dataset import POSITIVE_WORDS, NEGATIVE_WORDS
 
+import string
+import re
+
 
 class MoodAnalyzer:
     """
@@ -52,8 +55,95 @@ class MoodAnalyzer:
           - Handle simple emojis separately (":)", ":-(", "🥲", "😂")
           - Normalize repeated characters ("soooo" -> "soo")
         """
-        cleaned = text.strip().lower()
+
+        # Handle simple emojis separately
+        SIMPLE_EMOJI_MAP = {
+          ":)": "happy",
+          ":-)": "happy",
+          ":(": "sad",
+          ":-(": "sad",
+          ">:(": "angry",
+          ":D": "excited",
+          ">:D": "fun",
+          "D:": "sad",
+          "😄": "happy",
+          "😊": "happy",
+          "😆": "laughing",
+          "😂": "laughing",
+          "🤣": "laughing",
+          "🥲": "sad",
+          "😢": "sad",
+          "😔": "sad",
+          "😞": "sad",
+          "❤️": "love",
+          "💗": "love",
+          "💘": "love",
+          "💝": "love",
+          "💖": "love",
+          "💓": "love",
+          "💞": "love",
+          "💕": "love",
+          "😡": "angry",
+          "😠": "angry",
+          "🤬": "angry",
+          "🙄": "annoyed",
+          "☀️": "bright",
+          "🤢": "queasy"
+        }
+        for emoji, replacement in SIMPLE_EMOJI_MAP.items():
+            text = text.replace(emoji, f" {replacement} ")
+
+        # lowercase + remove leading/trailing spaces
+        text = text.strip().lower()
+
+        # normalize stretched out words like soooooo to just soo
+        text = re.sub(r'(.)\1{2,}', r'\1\1', text)
+
+        # handle emotive abbreviations separately
+        text = text.replace("lol", "laughing")
+        text = text.replace("lmao", "laughing")
+        
+        # make contractions negations for easier scoring
+        CONTRACTIONS = {
+          "can't": "can not",
+          "won't": "will not",
+          "don't": "do not",
+          "doesn't": "does not",
+          "isn't": "is not",
+          "wasn't": "was not",
+          "didn't": "did not",
+          "wouldn't": "would not",
+          "couldn't": "could not",
+          "shouldn't": "should not",
+        }
+        for contraction, expanded in CONTRACTIONS.items():
+            text = text.replace(contraction, expanded)
+
+        # Attempts to target sarcastic phrasing
+        SARCASTIC_PHRASES = {
+            "love getting stuck in traffic": "hate traffic",
+            "love mondays": "hate mondays",
+            "love being ignored": "hate being ignored",
+            "oh great": "bad",
+            "yeah right": "disbelief",
+            "just wonderful": "bad",
+            "oh fantastic": "bad",
+        }
+
+        for phrase, replacement in SARCASTIC_PHRASES.items():
+            text = text.replace(phrase, replacement)
+
+
+        # Remove punctuation
+        cleaned = "".join(filter(lambda x: x not in string.punctuation, text))
+        
+        # tokenize
         tokens = cleaned.split()
+
+        # Remove stop/filler words
+        STOPWORDS = {"the", "a", "an", "is", "it", "in", "on", "at", "to", "and", "or", "but", "i", "you", "we", "they", "just", "really", "kinda", "of", "sorta", "feeling", "feelin", "too"}
+
+        tokens = [t for t in tokens if t not in STOPWORDS]
 
         return tokens
 
@@ -61,7 +151,7 @@ class MoodAnalyzer:
     # Scoring logic
     # ---------------------------------------------------------------------
 
-    def score_text(self, text: str) -> int:
+    def score_text(self, text: str) -> tuple[int, bool]:
         """
         Compute a numeric "mood score" for the given text.
 
@@ -83,8 +173,35 @@ class MoodAnalyzer:
         #
         # Hint: if you implement negation, you may want to look at pairs of tokens,
         # like ("not", "happy") or ("never", "fun").
-        pass
+        
+        tokens = self.preprocess(text)
+        score = 0
+        i = 0
+        # if there is the presence of negative or positive
+        # words rather than neither, a text is "mixed"
+        # instead of "neutral"
+        could_be_mixed = False
 
+        while i < len(tokens):
+            if (tokens[i] == "not" or tokens[i] == "never") and i < len(tokens)-1:
+                if tokens[i+1] in NEGATIVE_WORDS:
+                    score += 1
+                    could_be_mixed = True
+                elif tokens[i+1] in POSITIVE_WORDS:
+                    score -= 1
+                    could_be_mixed = True
+                i += 1
+            else:
+                if tokens[i] in NEGATIVE_WORDS:
+                    score -= 1
+                    could_be_mixed = True
+                elif tokens[i] in POSITIVE_WORDS:
+                    score += 1
+                    could_be_mixed = True
+            i+=1
+
+        return score, could_be_mixed
+    
     # ---------------------------------------------------------------------
     # Label prediction
     # ---------------------------------------------------------------------
@@ -110,7 +227,15 @@ class MoodAnalyzer:
         #   2. Return "positive" if the score is above 0.
         #   3. Return "negative" if the score is below 0.
         #   4. Return "neutral" otherwise.
-        pass
+        score, could_be_mixed = self.score_text(text)
+        if score > 0:
+            return "positive"
+        elif score < 0:
+            return "negative"
+        elif could_be_mixed:
+            return "mixed"
+        else:
+            return "neutral"
 
     # ---------------------------------------------------------------------
     # Explanations (optional but recommended)
